@@ -3,7 +3,7 @@ from typing import List
 from sqlalchemy.orm import Session
 
 from backend.config import SessionLocal
-from schemas import Model
+from backend.schemas import Model, UpdatePromptRequest
 from backend.models import ModelsDB
 
 
@@ -32,30 +32,51 @@ def get_prompts(db: Session = Depends(get_session)):
 
     result = db.query(ModelsDB).all()
     return result
-    # return db.query(DogDB).filter(DogDB.kind == kind).all()
 
 
-@app.get('/prompt/{id}', response_model=Model)
-def get_prompt_id(id: int, db: Session = Depends(get_session)):
+@app.get('/get_prompt/{project_name}/{func_name}/{prompt}/{llm_name}', response_model=Model)
+def get_prompt(project_name: str, func_name: str,
+                  prompt: str, llm_name: str, db: Session = Depends(get_session)):
     """
-    Получение prompt по id
+    Получение prompt по параметрам
     """
+    try:
+        result = db.query(ModelsDB).filter(
+            ModelsDB.project_name == project_name,
+            ModelsDB.func_name == func_name,
+            ModelsDB.prompt == prompt,
+            ModelsDB.llm_name == llm_name
+        ).first()
 
-    result = db.query(ModelsDB).filter(ModelsDB.id == id).all()
-    return result
+        if result is None:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        return result
+
+    except Exception as e:
+        import logging
+        logging.exception(f"Ошибка при получении prompt: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
 
 
-@app.post('/prompt/{id}', response_model=Model)
-def post_update_prompt(id: int, score: int, comment: str, db: Session = Depends(get_session)):
+@app.put("/update_prompt", response_model=Model)
+def update_prompt(request: UpdatePromptRequest, db: Session = Depends(get_session)):
     """
-    Обновление оценки и комментария для конкретной комбинации Prompt + LLM
+    Обновление оценки и комментария для конкретной комбинации Prompt + LLM по идентификатору
     """
+    try:
+        model = db.query(ModelsDB).filter(ModelsDB.id == request.id).first()
 
-    model = db.query(ModelsDB).filter(ModelsDB.id == id).first()
+        if model is None:
+            raise HTTPException(status_code=404, detail='Prompt not found')
 
-    if model is None:
-        raise HTTPException(status_code=404, detail='Dog not found')
+        model.prompt = request.prompt
+        model.score = request.score
+        model.comment = request.comment
+        db.commit()
 
-    model.score = score
-    model.comment = comment
+        return model
+    except Exception as e:
+        db.rollback()  # Важно: откат транзакции при ошибке
+        raise HTTPException(status_code=500, detail=f"Ошибка базы данных: {e}")
+
 
